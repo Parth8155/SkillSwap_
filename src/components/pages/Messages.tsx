@@ -204,25 +204,19 @@ const Messages: React.FC<{ isSidebarCollapsed: boolean }> = ({ isSidebarCollapse
       userId: authUser.id
     });
 
+    const messageContent = message;
+    setMessage(''); // Clear input immediately
+
     socketRef.current.emit('sendMessage', {
       receiverId: other.id,
       conversationId: selectedConversation.id,
-      content: message
+      content: messageContent,
+      senderId: authUser.id,
+      senderName: authUser.name,
+      senderAvatar: authUser.avatar
     });
 
-    // Optimistically update UI with the correct structure
-    const newMessage = {
-      id: Date.now().toString(),
-      senderId: authUser.id,
-      content: message,
-      timestamp: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-      status: 'sending'
-    };
-
-    setMessages(prev => [...prev, newMessage]);
-    setMessage('');
-
+    // Don't add optimistic update - let the socket response handle it
     // Auto-scroll to bottom
     setTimeout(scrollToBottom, 100);
   };
@@ -268,7 +262,28 @@ const Messages: React.FC<{ isSidebarCollapsed: boolean }> = ({ isSidebarCollapse
     // Listen for incoming messages
     const messageHandler = (data: any) => {
       if (data.conversationId === selectedConversation.id) {
-        setMessages(prev => [...prev, data]);
+        // Prevent duplicate messages by checking if message already exists
+        setMessages(prev => {
+          const messageExists = prev.some(msg =>
+            msg.id === data.id ||
+            (msg.content === data.content &&
+              Math.abs(new Date(msg.timestamp || msg.createdAt).getTime() - new Date(data.timestamp || data.createdAt).getTime()) < 1000)
+          );
+
+          if (messageExists) {
+            return prev;
+          }
+
+          // Ensure sender information is properly populated
+          const messageWithSender = {
+            ...data,
+            senderId: data.senderId || data.sender?.id || data.sender,
+            senderName: data.senderName || data.sender?.name || authUser?.name || 'Unknown',
+            senderAvatar: data.senderAvatar || data.sender?.avatar || authUser?.avatar || ''
+          };
+
+          return [...prev, messageWithSender];
+        });
         setTimeout(scrollToBottom, 100);
       }
     };
@@ -326,9 +341,9 @@ const Messages: React.FC<{ isSidebarCollapsed: boolean }> = ({ isSidebarCollapse
   }
 
   return (
-    <div className={`flex-1 flex h-full transition-all duration-300 bg-gradient-to-br from-gray-50 via-white to-lime-50 ${isSidebarCollapsed ? 'md:ml-20' : 'md:ml-80'}`}>
+    <div className={`flex-1 flex h-screen transition-all duration-300 bg-gradient-to-br from-gray-50 via-white to-lime-50 ${isSidebarCollapsed ? 'md:ml-20' : 'md:ml-80'}`}>
       {/* Conversations List */}
-      <div className={`${isMobileView && selectedConversation ? 'hidden' : ''} w-full md:w-80 bg-white/80 backdrop-blur-sm border-r border-gray-200/60 flex flex-col shadow-lg`}>
+      <div className={`${isMobileView && selectedConversation ? 'hidden' : ''} w-full md:w-80 bg-white/80 backdrop-blur-sm border-r border-gray-200/60 flex flex-col shadow-lg h-full`}>
         {/* Enhanced Header */}
         <div className="p-6 border-b border-gray-200/60 bg-gradient-to-r from-white to-lime-50/30">
           <div className="flex items-center justify-between mb-4">
@@ -377,8 +392,8 @@ const Messages: React.FC<{ isSidebarCollapsed: boolean }> = ({ isSidebarCollapse
                 key={conversation.id}
                 onClick={() => setSelectedConversation(conversation)}
                 className={`p-4 border-b border-gray-100/60 cursor-pointer hover:bg-gradient-to-r hover:from-lime-50/50 hover:to-green-50/30 transition-all duration-200 ${isSelected
-                    ? 'bg-gradient-to-r from-lime-50 to-green-50/50 border-lime-200/60 shadow-inner'
-                    : ''
+                  ? 'bg-gradient-to-r from-lime-50 to-green-50/50 border-lime-200/60 shadow-inner'
+                  : ''
                   } ${hasUnread ? 'bg-blue-50/30' : ''}`}
               >
                 <div className="flex items-start space-x-3">
@@ -452,11 +467,11 @@ const Messages: React.FC<{ isSidebarCollapsed: boolean }> = ({ isSidebarCollapse
       </div>
 
       {/* Enhanced Chat Area */}
-      <div className={`flex-1 flex flex-col ${isMobileView && !selectedConversation ? 'hidden' : ''}`}>
+      <div className={`flex-1 flex flex-col h-full ${isMobileView && !selectedConversation ? 'hidden' : ''}`}>
         {selectedConversation ? (
           <>
             {/* Enhanced Chat Header */}
-            <div className="p-4 border-b border-gray-200/60 bg-white/90 backdrop-blur-sm shadow-sm">
+            <div className="p-4 border-b border-gray-200/60 bg-white/90 backdrop-blur-sm shadow-sm flex-shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                   {isMobileView && (
@@ -525,101 +540,108 @@ const Messages: React.FC<{ isSidebarCollapsed: boolean }> = ({ isSidebarCollapse
             </div>
 
             {/* Enhanced Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gradient-to-b from-gray-50/30 to-white/50 backdrop-blur-sm">
-              {messages.map((msg, index) => {
-                // Handle both populated and non-populated senderId
-                const senderId = msg.senderId?.id || msg.senderId?._id || msg.senderId;
-                const isCurrentUser = String(senderId) === String(authUser?.id);
-                const senderName = msg.senderId?.name || 'Unknown';
+            <div className="flex-1 overflow-y-auto p-4 bg-gradient-to-b from-gray-50/30 to-white/50 backdrop-blur-sm min-h-0">
+              <div className="space-y-4">
+                {messages.map((msg, index) => {
+                  // Handle both populated and non-populated senderId
+                  const senderId = msg.senderId?.id || msg.senderId?._id || msg.senderId;
+                  const isCurrentUser = String(senderId) === String(authUser?.id);
 
-                // Check if this message is from a different sender than the previous one
-                const prevMsg = messages[index - 1];
-                const prevSenderId = prevMsg ? (prevMsg.senderId?.id || prevMsg.senderId?._id || prevMsg.senderId) : null;
-                const isNewSender = !prevMsg || String(senderId) !== String(prevSenderId);
+                  // Get sender info with better fallbacks
+                  const senderName = msg.senderName || msg.senderId?.name || msg.sender?.name ||
+                    (isCurrentUser ? authUser?.name : getOtherParticipant(selectedConversation)?.name) || 'Unknown';
+                  const senderAvatar = msg.senderAvatar || msg.senderId?.avatar || msg.sender?.avatar ||
+                    (isCurrentUser ? authUser?.avatar : getOtherParticipant(selectedConversation)?.avatar) || '';
 
-                return (
-                  <div key={msg.id} className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
-                    <div className={`max-w-xs lg:max-w-md ${isCurrentUser ? 'order-2' : 'order-1'}`}>
-                      {/* Show sender avatar and name for new senders (non-current user) */}
-                      {!isCurrentUser && isNewSender && (
-                        <div className="flex items-center space-x-2 mb-2 ml-1">
-                          <Avatar
-                            src={msg.senderId?.avatar || ''}
-                            name={senderName}
-                            size={24}
-                          />
-                          <span className="text-xs font-medium text-gray-600">{senderName}</span>
-                        </div>
-                      )}
+                  // Check if this message is from a different sender than the previous one
+                  const prevMsg = messages[index - 1];
+                  const prevSenderId = prevMsg ? (prevMsg.senderId?.id || prevMsg.senderId?._id || prevMsg.senderId) : null;
+                  const isNewSender = !prevMsg || String(senderId) !== String(prevSenderId);
 
-                      <div className={`px-4 py-3 rounded-2xl shadow-sm transition-all duration-200 hover:shadow-md ${isCurrentUser
+                  return (
+                    <div key={msg.id || `${msg.content}-${msg.timestamp}-${index}`} className={`flex ${isCurrentUser ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-xs lg:max-w-md ${isCurrentUser ? 'order-2' : 'order-1'}`}>
+                        {/* Show sender avatar and name for new senders (non-current user) */}
+                        {!isCurrentUser && isNewSender && (
+                          <div className="flex items-center space-x-2 mb-2 ml-1">
+                            <Avatar
+                              src={senderAvatar}
+                              name={senderName}
+                              size={24}
+                            />
+                            <span className="text-xs font-medium text-gray-600">{senderName}</span>
+                          </div>
+                        )}
+
+                        <div className={`px-4 py-3 rounded-2xl shadow-sm transition-all duration-200 hover:shadow-md ${isCurrentUser
                           ? 'bg-gradient-to-r from-gray-900 to-gray-800 text-white rounded-tr-md ml-4'
                           : 'bg-white text-gray-900 rounded-tl-md border border-gray-200/60 mr-4'
-                        }`}>
-                        <p className="text-sm leading-relaxed">{msg.content}</p>
-
-                        <div className={`flex items-center justify-between mt-2 text-xs ${isCurrentUser ? 'text-gray-300' : 'text-gray-500'
                           }`}>
-                          <span>{formatMessageTime(msg.timestamp || msg.createdAt)}</span>
+                          <p className="text-sm leading-relaxed">{msg.content}</p>
 
-                          {/* Message status indicators for current user */}
-                          {isCurrentUser && (
-                            <div className="flex items-center space-x-1">
-                              {msg.status === 'sending' && (
-                                <Circle className="w-3 h-3 animate-pulse text-gray-400" />
-                              )}
-                              {msg.status === 'sent' && (
-                                <CheckCheck className="w-3 h-3 text-gray-400" />
-                              )}
-                              {msg.status === 'delivered' && (
-                                <CheckCheck className="w-3 h-3 text-gray-300" />
-                              )}
-                              {msg.status === 'read' && (
-                                <CheckCheck className="w-3 h-3 text-lime-400" />
-                              )}
-                            </div>
-                          )}
+                          <div className={`flex items-center justify-between mt-2 text-xs ${isCurrentUser ? 'text-gray-300' : 'text-gray-500'
+                            }`}>
+                            <span>{formatMessageTime(msg.timestamp || msg.createdAt)}</span>
+
+                            {/* Message status indicators for current user */}
+                            {isCurrentUser && (
+                              <div className="flex items-center space-x-1">
+                                {msg.status === 'sending' && (
+                                  <Circle className="w-3 h-3 animate-pulse text-gray-400" />
+                                )}
+                                {msg.status === 'sent' && (
+                                  <CheckCheck className="w-3 h-3 text-gray-400" />
+                                )}
+                                {msg.status === 'delivered' && (
+                                  <CheckCheck className="w-3 h-3 text-gray-300" />
+                                )}
+                                {msg.status === 'read' && (
+                                  <CheckCheck className="w-3 h-3 text-lime-400" />
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
 
-              {/* Typing indicator */}
-              {typingUsers.size > 0 && (
-                <div className="flex justify-start">
-                  <div className="bg-white rounded-2xl rounded-tl-md px-4 py-3 shadow-sm border border-gray-200/60 mr-4">
-                    <div className="flex items-center space-x-2">
-                      <div className="flex space-x-1">
-                        <Circle className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                        <Circle className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                        <Circle className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                {/* Typing indicator */}
+                {typingUsers.size > 0 && (
+                  <div className="flex justify-start">
+                    <div className="bg-white rounded-2xl rounded-tl-md px-4 py-3 shadow-sm border border-gray-200/60 mr-4">
+                      <div className="flex items-center space-x-2">
+                        <div className="flex space-x-1">
+                          <Circle className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                          <Circle className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                          <Circle className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                        </div>
+                        <span className="text-xs text-gray-500">typing...</span>
                       </div>
-                      <span className="text-xs text-gray-500">typing...</span>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
 
-              {messages.length === 0 && (
-                <div className="flex-1 flex items-center justify-center min-h-[400px]">
-                  <div className="text-center text-gray-500">
-                    <div className="w-20 h-20 bg-gradient-to-r from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
-                      <Send className="w-10 h-10 text-gray-400" />
+                {messages.length === 0 && (
+                  <div className="flex items-center justify-center min-h-[400px]">
+                    <div className="text-center text-gray-500">
+                      <div className="w-20 h-20 bg-gradient-to-r from-gray-100 to-gray-200 rounded-full flex items-center justify-center mx-auto mb-6 shadow-inner">
+                        <Send className="w-10 h-10 text-gray-400" />
+                      </div>
+                      <h3 className="text-lg font-medium text-gray-700 mb-2">No messages yet</h3>
+                      <p className="text-sm text-gray-500">Start the conversation!</p>
                     </div>
-                    <h3 className="text-lg font-medium text-gray-700 mb-2">No messages yet</h3>
-                    <p className="text-sm text-gray-500">Start the conversation!</p>
                   </div>
-                </div>
-              )}
+                )}
 
-              {/* Auto-scroll target */}
-              <div ref={messagesEndRef} />
+                {/* Auto-scroll target */}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
 
             {/* Enhanced Message Input */}
-            <div className="p-4 border-t border-gray-200/60 bg-white/90 backdrop-blur-sm">
+            <div className="p-4 border-t border-gray-200/60 bg-white/90 backdrop-blur-sm flex-shrink-0">
               <div className="flex items-end space-x-3">
                 <button
                   className="p-3 text-gray-400 hover:text-gray-600 rounded-xl hover:bg-gray-100 transition-all duration-200 flex-shrink-0"
@@ -660,8 +682,8 @@ const Messages: React.FC<{ isSidebarCollapsed: boolean }> = ({ isSidebarCollapse
                   onClick={handleSendMessage}
                   disabled={!message.trim()}
                   className={`w-12 h-12 rounded-2xl flex items-center justify-center transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 flex-shrink-0 ${message.trim()
-                      ? 'bg-gradient-to-r from-lime-400 to-green-500 text-white hover:from-lime-500 hover:to-green-600'
-                      : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                    ? 'bg-gradient-to-r from-lime-400 to-green-500 text-white hover:from-lime-500 hover:to-green-600'
+                    : 'bg-gray-200 text-gray-400 cursor-not-allowed'
                     }`}
                   title="Send message"
                 >
