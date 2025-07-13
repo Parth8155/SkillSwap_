@@ -12,10 +12,11 @@ npm run dev:both
 ### Option 2: Run Separately
 ```bash
 # Terminal 1 - Frontend (React + Vite)
-npm run dev:client
+npm run dev
 
 # Terminal 2 - Backend (Node.js + Express)
-npm run dev:server
+cd server
+npm run dev
 ```
 
 ## 📁 Project Structure
