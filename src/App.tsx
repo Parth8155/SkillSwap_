@@ -47,15 +47,7 @@ function App() {
     return (
       <div className="min-h-screen bg-gradient-to-br from-gray-50 via-white to-lime-50">
         <div className="container mx-auto px-4 py-8">
-          <div className="mb-8">
-            <ConnectionStatus />
-          </div>
-          <div className="mb-8">
-            <AuthTest />
-          </div>
-          <div className="mb-8">
-            <TokenDebugger />
-          </div>
+
           {authMode === 'login' ? (
             <Login
               onLogin={login}
